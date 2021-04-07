@@ -1,10 +1,14 @@
 const OutboundJS = require('./api/outbound.js');
 
 // will continue to expand this as functionality is added
+// A slick way to do this would be to have a way for us to
+// load in these API defs from, say, an external file or a
+// database. I'm keeping it this way for now, but I do want
+// to acknowledge that this could be made even slicker.
 var NHLPublicAPI = {
     "slug": "NHLPublicAPI",
     "parentURI": "https://statsapi.web.nhl.com/api",
-    "version": "1.0",
+    "version": "v1",
     "endpoints": [
         {
             "slug": "Teams",

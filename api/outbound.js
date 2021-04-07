@@ -1,5 +1,6 @@
 
 const https = require('https')
+const URL = require('url').URL;
 
 /*
  * outbound.js -- A simple functional wrapper for making outbound API requests.
@@ -35,6 +36,7 @@ class EndpointModifier {
     // These static wrappers for the constructor are written such that anonymous objects are
     // converted, value-for-value, to the correct object prototype.
     static generateFromObject(primitive={}) {
+        //console.log("generating endpoint modifier " + primitive);
         if (primitive["handle"] === undefined)
             primitive["handle"] = "defaultModifier";
         
@@ -64,7 +66,7 @@ class Endpoint {
                 + slug + '\', found object: ' + modifiers.toString();
 
         for (let m in modifiers) {
-            if (!(m instanceof EndpointModifier))
+            if (!(modifiers[m] instanceof EndpointModifier))
                 throw 'Passed invalid EndpointModifer object for endpoint `' + slug 
                     + '\', found object: ' + m.toString();
         }
@@ -84,6 +86,8 @@ class Endpoint {
     }
 
     static generateFromObject(primitive={}) {
+        //console.log("generating endpoint from primitive " + primitive.toString());
+
         // validation--really just making sure things that should be present are present
         if (primitive["slug"] === undefined)    primitive["slug"] = "DefaultEndpoint";
         if (primitive["request"] === undefined) primitive["request"] = "default-endpoint";
@@ -93,12 +97,13 @@ class Endpoint {
         if (primitive["modifiers"] === undefined || !Array.isArray(primitive["modifiers"]))
             primitive["modifiers"] = [];
         
-        // convert modifier sub-object array into the correct object type (i.e. so instanceof
-        // cooperates with future operations on these objects)
-        let e = [];
-        for (let modifier in primitive["modifiers"])
-            e.push(EndpointModifier.generateFromObject(endpoint));
-        primitive["endpoints"] = e;
+        // convert modifier sub-object array into the correct object type (i.e. so they
+        // share the same prototype)
+        let m = [];
+        for (let i = 0; i < primitive["modifiers"].length; i++) {
+            m.push(EndpointModifier.generateFromObject(primitive["modifiers"][i]));
+        }
+        primitive["modifiers"] = m;
         
         // by doing this, we ensure the object matches the prototype of Endpoint
         return new this(primitive["slug"], primitive["request"], 
@@ -108,25 +113,19 @@ class Endpoint {
 
 /* Simplified outbound transaction handler. */
 class OutboundHandler {
-    constructor(slug, parentURI, version, port=443) {
+    constructor(slug, parentURI, version, endpoints=[], encoding="utf8") {
         this.slug = slug;               // human readable name (should be unique, but at present nothing enforces this)
         this.parentURI = parentURI;     // where is the API? i.e. https://foo.com/api - NO TRAILING SLASH!
         this.version = version;         // what version should we use?
-        this.endpoints = [];
+        this.endpoints = endpoints;
 
 
-        let url = new URL(slug)
-
-        this.connectionOptions = {
-            hostname: url.hostname,
-            port: port, 
-            path: url.pathname,
-            method: 'GET' // TODO: For the moment, our outbound only supports GET
-        };
+        let url = new URL(parentURI)
+        this.StageRequest(url);
 
     }
 
-    // A nice convenient way to add endpoints in the form of a JSON object. 
+    // A nice convenient way to add outbound handlers for endpoints using a JSON object.
     // In theory, we could pass files full of these things which would make redefining endpoints a lot easier
     // and would allow live changes to the endpoint config with only one file.
     static CreateHandler(primitive={}) {
@@ -136,12 +135,16 @@ class OutboundHandler {
         if (primitive["version"] === undefined) primitive["version"] = "";
         if (primitive["endpoints"] === undefined || !Array.isArray(primitive["endpoints"]))
             primitive["endpoints"] = [];
+            
+        //console.log(primitive["endpoints"]);
 
         // convert endpoint sub-object array into the correct object type (i.e. so instanceof
         // cooperates with future operations on these objects)
         let e = [];
-        for (let endpoint in primitive["endpoints"])
-            e.push(Endpoint.generateFromObject(endpoint));
+        for (let i = 0; i < primitive["endpoints"].length; i++) {
+            e.push(Endpoint.generateFromObject(primitive["endpoints"][i]));
+        }
+            
         primitive["endpoints"] = e;
         
         // by doing this, we ensure the object matches the prototype of OutboundHandler
@@ -151,6 +154,18 @@ class OutboundHandler {
             primitive["version"],
             primitive["endpoints"]
         );
+    }
+
+    StageRequest(url, port=443) {
+        if (!(url instanceof URL))
+            throw "Passed URL object is not actually URL object: " + url.toString();
+
+        this.connectionOptions = {
+            hostname: url.hostname,
+            port: port, 
+            path: url.pathname,
+            method: 'GET' // TODO: For the moment, our outbound only supports GET
+        };
     }
 
     // Getter that returns the base URI in the format
@@ -170,7 +185,7 @@ class OutboundHandler {
         }
 
         for (let e in this.endpoints) { // enforcing the slug "must be unique"
-            if (e.slug === endpoint.slug)
+            if (this.endpoints[e].slug == endpoint.slug)
                 throw 'Duplicate endpoint with slug `' + e.slug + '\' added to outbound handler `' 
                     + this.slug + '\'';
         }
@@ -179,17 +194,22 @@ class OutboundHandler {
     }
 
     generateRequestURI(endpoint, parameters={}, modifiers={}) {
+        //console.log(this);
         let ep = null;
-        if (typeof endpoint === 'string' || myVar instanceof String) {
+        if (typeof endpoint === 'string' || endpoint instanceof String) {
+            //console.log("observed string request for endpoint slug: " + endpoint);
             for (let e in this.endpoints)
-                if (endpoint === e.slug) {
-                    ep = e;
+                if (this.endpoints[e].slug == endpoint) {
+                    //console.log("found endpoint");
+                    ep = this.endpoints[e];
                     break;
                 }
         } else if (endpoint instanceof Endpoint) {
+            //console.log("observed object request for endpoint slug: " + endpoint.slug);
             for (let e in this.endpoints)
-                if (endpoint === e) {
-                    endpoint = e;
+                if (this.endpoints[e] == endpoint) {
+                    //console.log("found endpoint");
+                    ep = this.endpoints[e];
                     break;
                 }
         } else {
@@ -199,10 +219,12 @@ class OutboundHandler {
         }
 
         // endpoint should never be null/mistyped beyond this point
+        // note for anyone in the audience: this assert actually helped a ton while debugging.
+        // very glad I kept it in!
         console.assert(ep !== null);
         console.assert(ep instanceof Endpoint);
 
-        let output = ep.slug.repeat(1); // force copy of the slug string
+        let output = ep.request.repeat(1); // force copy of the handle string -- JS likes to keep references
 
         // really quick--what's the point of a parameter array on the endpoint itself
         // if we're just going to pass them here? Well, during initial setup of an endpoint,
@@ -215,10 +237,10 @@ class OutboundHandler {
         // adding things that might cause undefined behavior.
         for (let key in parameters)
             if (Object.prototype.hasOwnProperty.call(parameters, key)) // no prototype nonsense
-                for (let validParam in ep.parameters)
-                    if (validParam == key) {
+                for (let v in ep.parameters)
+                    if (ep.parameters[v] == key) {
                         // did we match a valid parameter? if so, perform replacement
-                        output = output.replace("{"+validParam+"}", parameters[key]);
+                        output = output.replace("{"+ep.parameters[v]+"}", parameters[key]);
                         break;
                     }
         
@@ -236,24 +258,57 @@ class OutboundHandler {
                         break;
                     }
 
-        return output;
+        return this.RequestBaseURI + output;
     }
 
     // The main show: sending a request out based on predefined endpoints.
-    sendRequest(endpoint, callbackSuccess=null, callbackFailure=null, parameters={}, modifiers={}) {
-        let requestStr = this.generateRequestURI(endpoint, parameters, modifiers);
-        console.log("Requesting the following: `" + requestStr + "'");
+    sendRequest(endpoint, parameters={}, modifiers={}, callbackDone=null, callbackProgress=null, callbackFailure=null) {
+
+        // If we were to add POST, PUT, DELETE, etc. support, we would do it here.
+        // Right now, it's more or less hardcoded to always use GET. In a real-world implementation
+        // we would also look at the endpoint object and ascertain the request type.
+        // At that point, a simple switch() block would suffice, or maybe separating it into
+        // separate anonymous functions. (I like to avoid anonymous functions except at the outermost
+        // layers because debugging can be a pain if you have multiple levels of nested anonimity
+        // if I'm remembering past experience correctly)
+
+        // Obviously, https.request wants you to pass a function as its inputs, and most people
+        // use arrow notation to do this as seen below. This isn't a dealbreaker, just wanted it
+        // known that the irony isn't lost on me!
+
+        let requestStr = this.generateRequestURI(endpoint, 
+            parameters == null ? {} : parameters, 
+            modifiers == null ? {} : modifiers); 
+        //console.log("Requesting the following: `" + requestStr + "'");
         
+        let url = new URL(requestStr);
+        this.StageRequest(url);
+
         let req = https.request(this.connectionOptions, res => {
-            console.log(`Received status code: ${res.statusCode}`);
+            res.setEncoding('utf8');
+            //console.log(`Received status code: ${res.statusCode}`);
             
-            res.on('data', d => {
-                //process.stdout.write(d);
-                if (callbackSuccess != null)
-                    callbackSuccess(d, requestStr);
+            let responseBody = "";
+            let statusCode = res.statusCode;
+            
+            // For this 'data' response, which is used for data chunks as they
+            // arrive, I'm thinking maybe we could look for the 'content-length'
+            // header and then pass a number calculated as bytesReceived / bytesExpected
+            // to yield a progress-bar percentage. content-length is not guaranteed
+            // so there may be some other way to do this, and I'm not gonna spend
+            // a whole lot of time thinking about it, but I thought it worth mentioning
+            res.on('data', dataInProgress => {
+                responseBody += dataInProgress;
+                if (callbackProgress != null)
+                    callbackProgress(JSON.parse(dataInProgress), requestStr);
+            });
+
+            res.on('end', () => {
+                if (callbackDone != null) 
+                    callbackDone(responseBody, statusCode);
             });
         });
-          
+        
         req.on('error', error => {
             //throw 'Received error `' + error + "' for request `" + requestStr + "'";
             if (callbackFailure != null)

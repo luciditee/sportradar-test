@@ -13,6 +13,7 @@ var NHLPublicAPI = {
         {
             "slug": "Teams",
             "request": "teams",
+            "useCache": true,
             "parameters": [],
             "modifiers": [
                 {
@@ -29,6 +30,7 @@ var NHLPublicAPI = {
         {
             "slug": "TeamByID",
             "request": "teams/{ID}",
+            "useCache": true,
             "parameters": ["ID"],
             "modifiers": [
                 {

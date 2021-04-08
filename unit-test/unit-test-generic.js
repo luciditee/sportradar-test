@@ -25,13 +25,13 @@ class CallbackUnitTester {
 
     compareOutputs(out) {
         //console.log(this.expectedOutput);
-
+        
         // Technically O(n^2) and I'm not proud of this particular aspect.
         // I'm sure there's a better way to optimize this but I'm leaving it
         // in the interest of getting stuff done.
         for (let key in out)
             if (Object.prototype.hasOwnProperty.call(out, key)) {
-                let found = false;
+                let found = false;  
                 for (let i in this.expectedOutput) {
                     if (i == key) {         // It's only checking for the existence of keys.
                         found = true;       // This isn't super-thorough, but for JSON, it'll
@@ -40,6 +40,10 @@ class CallbackUnitTester {
                                             // sanity checking mechanism than a full-blown
                                             // debugging suite, and again, adding an actual
                                             // unit testing lib for this would be preferable.
+
+                                            // Note: This may have an advantage of not being
+                                            // fazed by the copyright date changing in each
+                                            // request body every year!
                         break;
                     }
                 }

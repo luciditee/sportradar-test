@@ -1,6 +1,7 @@
 
 const https = require('https')
 const URL = require('url').URL;
+const Cache = require('./cache.js').Cache;
 
 /*
  * outbound.js -- A simple functional wrapper for making outbound API requests.
@@ -48,9 +49,10 @@ class EndpointModifier {
 }
 
 class Endpoint {
-    constructor(slug, request, method, parameters=[], modifiers=[]) {
+    constructor(slug, request, method, useCache=true, parameters=[], modifiers=[]) {
         this.slug = slug;               // human-readable name (must be unique)
         this.request = request;         // the endpoint handle, i.e. foo in http://abc.com/api/v1.0/foo
+        this.useCache = useCache;
         this.method = method;           // the HTTP method in which this request is emitted (POST, GET, etc.)
         this.parameters = parameters;   // string patterns to extract when replacing certain parameters
                                         // i.e. when passing an ID, the string patterns
@@ -92,6 +94,7 @@ class Endpoint {
         if (primitive["slug"] === undefined)    primitive["slug"] = "DefaultEndpoint";
         if (primitive["request"] === undefined) primitive["request"] = "default-endpoint";
         if (primitive["method"] === undefined)  primitive["method"] = RequestTypeEnum.GET;
+        if (primitive["useCache" === undefined]) primitive["useCache"] = false;
         if (primitive["parameters"] === undefined || !Array.isArray(primitive["parameters"]))
             primitive["parameters"] = [];
         if (primitive["modifiers"] === undefined || !Array.isArray(primitive["modifiers"]))
@@ -121,8 +124,9 @@ class OutboundHandler {
 
 
         let url = new URL(parentURI)
-        this.StageRequest(url);
+        this.StageRequest(url); // preload a URL so nothing is left undefined
 
+        this.cache = new Cache(this.slug);
     }
 
     // A nice convenient way to add outbound handlers for endpoints using a JSON object.
@@ -193,8 +197,10 @@ class OutboundHandler {
         this.endpoints.push(endpoint);
     }
 
-    generateRequestURI(endpoint, parameters={}, modifiers={}) {
-        //console.log(this);
+    // sometimes, we might pass an endpoint string, other times we might pass a reference.
+    // this function is mainly to make sure we always end up working with the intended
+    // Endpoing object.
+    resolveEndpoint(endpoint) {
         let ep = null;
         if (typeof endpoint === 'string' || endpoint instanceof String) {
             //console.log("observed string request for endpoint slug: " + endpoint);
@@ -217,6 +223,13 @@ class OutboundHandler {
                 + 'valid Endpoint object, expecting string or Endpoint (' 
                 + ep.toString() + ')';
         }
+
+        return ep;
+    }
+
+    generateRequestURI(endpoint, parameters={}, modifiers={}) {
+        //console.log(this);
+        let ep = this.resolveEndpoint(endpoint);
 
         // endpoint should never be null/mistyped beyond this point
         // note for anyone in the audience: this assert actually helped a ton while debugging.
@@ -283,7 +296,19 @@ class OutboundHandler {
         
         let url = new URL(requestStr);
         this.StageRequest(url);
-
+        
+        // If we are allowed to use a cache, and the item has been cached recently,
+        // we should grab it!
+        let tCache = this.cache; // local copy to use in the anonymous functions below
+        let canCache = this.resolveEndpoint(endpoint).useCache; // ditto
+        let cachedResult = this.cache.findByKey(requestStr); // get cached result
+        if (canCache && cachedResult !== undefined) { // cache result exists, use it
+            //console.log("using cached response for " + requestStr);
+            callbackDone(cachedResult, 200); // ensure we emulate HTTP 200 OK
+            return;
+        }
+        
+        // If we're here, it wasn't cached or we shouldn't be using a cached copy.
         let req = https.request(this.connectionOptions, res => {
             res.setEncoding('utf8');
             //console.log(`Received status code: ${res.statusCode}`);
@@ -304,6 +329,12 @@ class OutboundHandler {
             });
 
             res.on('end', () => {
+                // If we were allowed to cache, save this response.
+                if (canCache) {
+                    // Use requestStr (the URI) as the key.
+                    tCache.addToCache(requestStr, responseBody);
+                }
+
                 if (callbackDone != null) 
                     callbackDone(responseBody, statusCode);
             });

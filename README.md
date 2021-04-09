@@ -18,13 +18,53 @@ VSCode (running under WSL) was used to actually write the code.
 ## How to use
 *This section will be filled in when the challenge is completed.*
 
-## Features
+## In-Depth Look
+*This section is for documentation purposes and explaining why things were made a certain way.* Reading through this section isn't really required unless you want a deeper understanding
+
+### Generalized ETL handling
+The ETL (**E**xtract, **T**ransform, **L**oad) system built into this solution is designed to be more or less dynamically controllable entirely via JSON directives.
+
+The system is tightly coupled with the endpoint handling, [discussed below.](#generalized-endpoint-handling), but also allows you to sample from *multiple different APIs* if required. This would be useful in contexts outside of closed systems, such as if you were to combine weather data with traffic report data.
+
+#### Extract
+The data is extracted from the API by way of *work units.* Work units represent individual API calls, which are paired to specific endpoints. In the overwhelming majority of cases, accessing certain data to complete an ETL cycle requires you to run certain API calls first. Adopting a convention from SQL, these are referred to in the code as "primary keys."
+
+For example, if you need to look up a team, and then subsequently use that team ID to look up how well they did for a particular season, the *team ID* is said to be the *primary key.* What this amounts to is that work units marked as primary keys will run before any other data is run, such that the needed information from those requests is pre-cached ahead of time.
+
+If data in one work unit depends on a data in another work unit, you can take advantage of the fact that work units are parsed sequentially, with primary keys always promoted to first.
+
+#### Transform
+Work units are encapsulated into *query units*, which handle the data ingest (transform) phase of the data returned by work units. This makes the query unit the basic, "big-picture" definition of any ETL pipeline you wish to create.
+
+When creating a query unit, [API definitions](#generalized-endpoint-handling), work unit definitions, and *output expectations* are passed in as one JSON object. At that point, all you have to do is `RunQuery()` on the query unit! You've essentially built a multi-API-call query out of nested JSON objects, with parameterization. Once you get the output from this query, you can do whatever you want with it, but while building the query units, you should set up your *output expectations* first.
+
+The aforementioned *output expectations* are a JSON whitelist looking for specific keys in the received data, which can then be transformed into *new* key names in the format 
+
+```js
+[ {"oldKey1": "newKey1"}, {"oldKey2":"newKey2"} . . .]
+```
+
+If output expectations are supplied, then data *not* matching the above `oldKeys` will be omitted from the final output, allowing you to effectively whitelist (and transform) the data you want in the final output.
+
+#### Load
+The *load phase* is simple in that it returns JSON and can be thus converted easily into any format. For the purposes of this exercise, a CSV converter is supplied (see `etl-csv.js`).
+
+#### Caching
+Outbound API requests are always cached, as long as the endpoint defs are configured to allow it (see [below](#response-caching) for details). The results of different `QueryUnit`s can also be cached based on the input parameters, so that repeat-instances of the same query will always return the same result without saturating the network.
+
+Cache TTL for `QueryUnit` entries is defined by the lowest-detected value of any cachable endpoint involved in the query. If no such value is detected, or none of them are cacheable, 300 seconds (5 minutes) is used as the default stand-in.
+
+Caching must be explicitly enabled for each `QueryUnit`, so if you're operating on live, realtime data, you can omit caching from the process--because obviously, you don't want stale game-score/game-time data coming down the pipeline.
+
+#### What does an ETL unit (query unit) look like?
+*JSON example will be added here.*
+
 ### Generalized endpoint handling
 Within `api/outbound.js` is a generalized handler for any REST API. It defines endpoints, parameterized inputs, and modifier inputs that can be passed as part of a URI (in a GET request).\*
 
 The general structure of this implementation follows a standard callback pattern, specifically the [continuation-passing style](https://subscription.packtpub.com/book/web_development/9781783287314/1/ch01lvl1sec10/the-callback-pattern).
 
-Target REST APIs can be defined as pure JSON, as seen in `apidefs.js`. You just define the endpoint, what parameters it takes, any modifiers you think may be relevant to its usage, and then send for an API call:
+Target REST APIs can be defined as pure JSON, as seen in `apidefs.js`. You just define the endpoint, what parameters it takes, any modifiers you think may be relevant to its usage, and then send for an API call like so:
 
 ```js
 out.sendRequest("TeamByID", {"ID": 5}, null, // "ID" parameter set to 5, null (no) modifiers.
@@ -43,7 +83,7 @@ out.sendRequest("TeamByID", {"ID": 5}, null, // "ID" parameter set to 5, null (n
 );   
 ```
 
-\* Support for `POST`, `PUT`, `DELETE`, etc. are not included in this demonstration because the target API for the challenge does not use any of those request types. Adding them would be relatively trivial--see comments in `api/outbound.js` for more info.
+\* Support for `POST`, `PUT`, `DELETE`, etc. are not included in this demonstration because the target API for the challenge does not use any of those request types. Adding them would be relatively trivial, and would only modify two functions--see comments in `api/outbound.js` for more info.
 
 ### Response caching
 To combat cases of rate limiting, as well as to allow holding on to exceptionally large response bodies, or perhaps even copies of data unlikely to ever change (such as historic data), each endpoint object in `apidefs.js` can be configured to `useCache` (either `true` or `false`).

@@ -207,7 +207,7 @@ class QueryUnit {
             ExtractParams(workUnit, hashtable, "depMods"),
             (data, statusCode) => {
                 d = data;
-            }
+            } // TODO: error callback handling
         );
 
         let ret = null;

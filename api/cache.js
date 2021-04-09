@@ -35,18 +35,18 @@ const fs = require('fs');
  * 
  */
 
-const timeToLive = 300; // 300 second (5 minute) TTL on the cache.
-                        // I have a feeling we'd reduce this in production!
+const timeToLive = 300; // At one point was the default, kept for posterity
 
 class CacheEntry {
-    constructor(uniqueInputKey, value) {
+    constructor(uniqueInputKey, value, ttl=300) {
         this.uniqueInputKey = uniqueInputKey;
         this.value = value;
         this.timestamp = Math.floor(Date.now() / 1000);
+        this.ttl = ttl;
     }
 
     isStale() {
-        return (Math.floor(Date.now() / 1000) - this.timestamp) > timeToLive;
+        return (Math.floor(Date.now() / 1000) - this.timestamp) > this.ttl;
     }
 }
 
@@ -133,9 +133,9 @@ class CacheContainer {
         // mind so I'm keeping it there for now. Loose-typed languages are funky!
     }
 
-    addToCache(key, value) {
+    addToCache(key, value, ttl=300) {
         let keyHash = this.hash(key);
-        let entry = new CacheEntry(key, value);        
+        let entry = new CacheEntry(key, value, ttl);        
 
         // If there was no collision, we're just defining an array of
         // 0 length so when we push it to the array, there's an array

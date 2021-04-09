@@ -49,10 +49,11 @@ class EndpointModifier {
 }
 
 class Endpoint {
-    constructor(slug, request, method, useCache=true, parameters=[], modifiers=[]) {
+    constructor(slug, request, method, useCache=true, ttl=500, parameters=[], modifiers=[]) {
         this.slug = slug;               // human-readable name (must be unique)
         this.request = request;         // the endpoint handle, i.e. foo in http://abc.com/api/v1.0/foo
         this.useCache = useCache;
+        this.cacheTTL = ttl;
         this.method = method;           // the HTTP method in which this request is emitted (POST, GET, etc.)
         this.parameters = parameters;   // string patterns to extract when replacing certain parameters
                                         // i.e. when passing an ID, the string patterns
@@ -70,7 +71,7 @@ class Endpoint {
         for (let m in modifiers) {
             if (!(modifiers[m] instanceof EndpointModifier))
                 throw 'Passed invalid EndpointModifer object for endpoint `' + slug 
-                    + '\', found object: ' + m.toString();
+                    + '\', found object: ' + modifiers[m].toString();
         }
 
         // silly way of validating the method, should have a min/max bounding on the RequestTypeEnum object, but
@@ -95,6 +96,7 @@ class Endpoint {
         if (primitive["request"] === undefined) primitive["request"] = "default-endpoint";
         if (primitive["method"] === undefined)  primitive["method"] = RequestTypeEnum.GET;
         if (primitive["useCache" === undefined]) primitive["useCache"] = false;
+        if (primitive["cacheTTL" === undefined]) primitive["cacheTTL"] = 500; // default TTL
         if (primitive["parameters"] === undefined || !Array.isArray(primitive["parameters"]))
             primitive["parameters"] = [];
         if (primitive["modifiers"] === undefined || !Array.isArray(primitive["modifiers"]))
@@ -110,7 +112,7 @@ class Endpoint {
         
         // by doing this, we ensure the object matches the prototype of Endpoint
         return new this(primitive["slug"], primitive["request"], 
-            primitive["method"], primitive["parameters"], primitive["modifiers"])
+            primitive["method"], primitive["useCache"], primitive["cacheTTL"], primitive["parameters"], primitive["modifiers"])
     }
 }
 
@@ -300,7 +302,8 @@ class OutboundHandler {
         // If we are allowed to use a cache, and the item has been cached recently,
         // we should grab it!
         let tCache = this.cache; // local copy to use in the anonymous functions below
-        let canCache = this.resolveEndpoint(endpoint).useCache; // ditto
+        let epLocal = this.resolveEndpoint(endpoint); // ditto
+        let canCache = epLocal.useCache; // ditto
         let cachedResult = this.cache.findByKey(requestStr); // get cached result
         if (canCache && cachedResult !== undefined) { // cache result exists, use it
             //console.log("using cached response for " + requestStr);
@@ -332,7 +335,7 @@ class OutboundHandler {
                 // If we were allowed to cache, save this response.
                 if (canCache) {
                     // Use requestStr (the URI) as the key.
-                    tCache.addToCache(requestStr, responseBody);
+                    tCache.addToCache(requestStr, responseBody, epLocal.cacheTTL);
                 }
 
                 if (callbackDone != null) 

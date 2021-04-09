@@ -1,5 +1,3 @@
-const OutboundJS = require('./api/outbound.js');
-
 // will continue to expand this as functionality is added
 // A slick way to do this would be to have a way for us to
 // load in these API defs from, say, an external file or a
@@ -14,6 +12,7 @@ var NHLPublicAPI = {
             "slug": "Teams",
             "request": "teams",
             "useCache": true,
+            "cacheTTL": 300,
             "parameters": [],
             "modifiers": [
                 {

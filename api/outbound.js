@@ -267,7 +267,7 @@ class OutboundHandler {
         for (let key in modifiers)
             if (Object.prototype.hasOwnProperty.call(modifiers, key))
                 for (let validModifier in ep.modifiers)
-                    if (validModifier == key) {
+                    if (validModifier.handle !== undefined && validModifier.handle === key) {
                         // we found a valid modifier, append it to the string with its value
                         output += ((!first ? "&" : "?") + key + "=" + modifiers[key]);
                         break;

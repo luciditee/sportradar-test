@@ -28,9 +28,9 @@ var NHLPublicAPI = {
         },
         {
             "slug": "TeamByID",
-            "request": "teams/{ID}",
+            "request": "teams/{id}",
             "useCache": true,
-            "parameters": ["ID"],
+            "parameters": ["id"],
             "modifiers": [
                 {
                     "handle" : "expand",
@@ -39,6 +39,13 @@ var NHLPublicAPI = {
                     "handle" : "stats",
                 },
             ]
+        },
+        {
+            "slug": "TeamRoster",
+            "request": "teams/{id}/roster",
+            "useCache": true,
+            "parameters": ["id"],
+            "modifiers": []
         },
     ]
 };

@@ -1,22 +1,45 @@
-const Outbound = require('./api/outbound.js').OutboundHandler;
-const APIs = require('./apidefs.js');
-const OutboundUnitTests = require('./unit-test/outbound-test.js');
+const ETL = require("./etl/etl-ingest.js").QueryUnit;
+const obj2csv = require("./etl/etl-csv.js").obj2csv;
+const NHLPublicAPI = require("./apidefs.js").NHLPublicAPI;
 
-// unit testing!
-OutboundUnitTests.RunUnitTests();
+// A test ETL query that fetches the name of the first player on the roster,
+// the name of the team, and the team ID, if you need that information for
+// some strange reason!
+var TestQuery = {
+    "handle": "TestQueryUnit",
+    "apiDefs": [NHLPublicAPI],
+    "workUnits": [
+        {
+            "apiSlug": "NHLPublicAPI",
+            "endpointSlug": "TeamByID",
+            "remoteKey": "id",
+            "localKey": "teamNumericID",
+            "isPrimary": true,
+            "depParams": ["id"]
+        },
+        {
+            "apiSlug": "NHLPublicAPI",
+            "endpointSlug": "TeamRoster",
+            "remoteKey": "roster",
+            "localKey": "roster",
+            "isPrimary": false,
+            "depParams": ["id"]
+        }
+    ],
+    "outputTransform": [
+        { 
+            "key": "id",
+            "value": "teamId"
+        },
+        {
+            "key": "name",
+            "value": "teamName"
+        },
+        {
+            "key": "key[0][person][name]",
+            "value": "firstPlayerName"
+        }
+    ]
+};
 
-// spinlock? I think that's what you'd call this.
-// My local version of node doesn't have the nice new promise-based sleep
-// so this'll have to do for now.
-var waitTill = new Date(new Date().getTime() + 3 * 1000);
-while(waitTill > new Date()){}
-
-// unit testing again!
-OutboundUnitTests.RunUnitTests();
-
-
-// note that if you run the code at this stage, you'll get the "using existing
-// cache" message twice. This is expected behavior because the unit test func-
-// tion creates a new OutboundHandler each time it runs. In a real-world scen-
-// ario, this wouldn't happen, because you're supposed to reuse the outbound
-// object instance. The idea is to have one outbound object per API.
+var testCase = ETL.Build(TestQuery);

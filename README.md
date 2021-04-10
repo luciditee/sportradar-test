@@ -36,15 +36,17 @@ If data in one work unit depends on a data in another work unit, you can take ad
 #### Transform
 Work units are encapsulated into *query units*, which handle the data ingest (transform) phase of the data returned by work units. This makes the query unit the basic, "big-picture" definition of any ETL pipeline you wish to create.
 
-When creating a query unit, [API definitions](#generalized-endpoint-handling), work unit definitions, and *output expectations* are passed in as one JSON object. At that point, all you have to do is `RunQuery()` on the query unit! You've essentially built a multi-API-call query out of nested JSON objects, with parameterization. Once you get the output from this query, you can do whatever you want with it, but while building the query units, you should set up your *output expectations* first.
+When creating a query unit, [API definitions](#generalized-endpoint-handling), work unit definitions, and *output transformations* are passed in as one JSON object. At that point, all you have to do is `RunQuery()` on the query unit! You've essentially built a multi-API-call query out of nested JSON objects, with parameterization. Once you get the output from this query, you can do whatever you want with it, but while building the query units, you should set up your *output transformation* first.
 
-The aforementioned *output expectations* are a JSON whitelist looking for specific keys in the received data, which can then be transformed into *new* key names in the format 
+The aforementioned *output transformation* is a key/value pair system that simply looks for data matching `key` in a hashtable composed of all of the WorkUnit outputs that ever occurred, and then
+include it in the final output with `value` as its column name.
+
+You can use the following embedded JSON syntax to extract nested data if needed:
 
 ```js
-[ {"oldKey1": "newKey1"}, {"oldKey2":"newKey2"} . . .]
+// Get the name of the first player from the roster query
+[ {"key": "roster[0][person][fullName]", "value":"firstPlayer"}]
 ```
-
-If output expectations are supplied, then data *not* matching the above `oldKeys` will be omitted from the final output, allowing you to effectively whitelist (and transform) the data you want in the final output.
 
 #### Load
 The *load phase* is simple in that it returns JSON and can be thus converted easily into any format. For the purposes of this exercise, a CSV converter is supplied (see `etl-csv.js`).
@@ -57,7 +59,46 @@ Cache TTL for `QueryUnit` entries is defined by the lowest-detected value of any
 Caching must be explicitly enabled for each `QueryUnit`, so if you're operating on live, realtime data, you can omit caching from the process--because obviously, you don't want stale game-score/game-time data coming down the pipeline.
 
 #### What does an ETL unit (query unit) look like?
-*JSON example will be added here.*
+```js
+// A test ETL query that fetches the name of the first player on the roster,
+// the name of the team, and the team ID, if you need that information for
+// some strange reason!
+var TestQuery = {
+    "handle": "TestQueryUnit",
+    "apiDefs": [NHLPublicAPI],
+    "workUnits": [
+        {
+            "apiSlug": "NHLPublicAPI",
+            "endpointSlug": "TeamByID",
+            "remoteKey": "id",
+            "localKey": "teamNumericID",
+            "isPrimary": true,
+            "depParams": ["id"]
+        },
+        {
+            "apiSlug": "NHLPublicAPI",
+            "endpointSlug": "TeamRoster",
+            "remoteKey": "roster",
+            "localKey": "roster",
+            "isPrimary": false,
+            "depParams": ["id"]
+        }
+    ],
+    "outputTransform": [
+        { 
+            "key": "id",
+            "value": "teamId"
+        },
+        {
+            "key": "name",
+            "value": "teamName"
+        },
+        {
+            "key": "key[0][person][name]",
+            "value": "firstPlayerName"
+        }
+    ]
+};```
 
 ### Generalized endpoint handling
 Within `api/outbound.js` is a generalized handler for any REST API. It defines endpoints, parameterized inputs, and modifier inputs that can be passed as part of a URI (in a GET request).\*

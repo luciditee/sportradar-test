@@ -91,7 +91,7 @@ class ETLWorkUnit {
     // for passing basic JSON objects, it's a good idea to make sure they share a prototype
     // with this class, so this function validates such a json object would contain all the
     // necessary values ahead-of-time
-    BuildWorkUnit(primitive) {
+    Build(primitive) {
         if (primitive["apiSlug"] === undefined)
             throw "A valid API slug is required to generate a work unit";
 
@@ -117,19 +117,24 @@ class ETLWorkUnit {
 }
 
 // You might also think of a query unit as "model" of sorts that defines how we
-// process a specific pattern of data.
+// process a specific pattern of data. There's a lot of metaphors floating around
+// in my head as I write this code, it seems like there's a lot of ways to solve this.
 class QueryUnit {
-    constructor(handle, apiDefs, workUnits) {
+    constructor(handle, apiDefs, workUnits, outputTransform) {
         this.handle = handle;
         this.apiDefs = apiDefs;
 
-        if (!Array.isArray(apiDefs))
+        if (apiDefs === undefined || !Array.isArray(apiDefs))
             throw "apiDefs must be passed as an array of objects";
 
-        if (!Array.isArray(workUnits))
+        if (workUnits === undefined || !Array.isArray(workUnits))
             throw "workUnits must be passed as an array of objects";
+
+        if (outputTransform === undefined || !Array.isArray(outputTransform))
+            throw "outputTransform must be passed as an array of objects";
         
-        // "$" = once again, taking advantage of hashtables
+        // "$" = once again, taking advantage of hashtables, to avoid JS assuming
+        // that I want to create an array rather than an object
         // $ is considered a valid variable character, so we can use it as a prefix
         // and it'd probably be good to define this as a const somewhere
         this.workUnits = {};
@@ -221,8 +226,28 @@ class QueryUnit {
 
     ExtractParams(workUnit, hashtable, target) {
         let output = {};
-        // TODO: do the key/value substitution from the hashtable to the target
-        // which should either be depMods or depParams
+        let workGroup = null;
+
+        // Could have just done workUnit[target] but I wanted to whitelist values
+        switch (target) {
+            case "depMods":
+                workGroup = workUnit.depMods;
+                break;
+            case "depParams": // Maybe move default up a line and put
+            default:          // a warning about an invalid string?
+                workGroup = workUnit.depParams;
+                break;
+        }
+
+        for (let i in workGroup) {
+            if (workGroup[i]["key"] === undefined || workGroup[i]["value"] === undefined)
+                continue; // skip invalid entries
+            
+            if (hashtable[workGroup[i]["key"]] !== undefined)
+                output[workGroup[i]["key"]] = workGroup[i]["value"];
+        }
+
+        return output;
     }
 
     GetOutboundHandlerBySlug(slug) {
@@ -233,12 +258,18 @@ class QueryUnit {
         return this.workUnits["$"+key]; 
     }
 
-    BuildQueryUnit(primitive) {
+    Build(primitive) {
         if (primitive["handle"] === undefined) 
             primitive["handle"] = "default-query-unit";
         if (primitive["apiDefs"] === undefined) primitive["apiDefs"] = [];
         if (primitive["workUnits"] === undefined) primitive["workUnits"] = [];
+        if (primitive["outputTransform"] === undefined) primitive["outputTransform"] = [];
         return new this(primitive["handle"], primitive["apiDefs"],
-            primitive["workUnits"]);
+            primitive["workUnits"], primitive["outputTransform"]);
     }
 }
+
+module.exports = {
+    QueryUnit : QueryUnit,
+    ETLWorkUnit : ETLWorkUnit
+};

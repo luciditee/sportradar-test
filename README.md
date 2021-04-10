@@ -59,7 +59,12 @@ Cache TTL for `QueryUnit` entries is defined by the lowest-detected value of any
 Caching must be explicitly enabled for each `QueryUnit`, so if you're operating on live, realtime data, you can omit caching from the process--because obviously, you don't want stale game-score/game-time data coming down the pipeline.
 
 #### What does an ETL unit (query unit) look like?
+This is the primary way of handling data throughout this solution. All you need ahead of time is the API def (in this case, `NHLPublicAPI`, defined in `apidefs.js`). Then, you can just include the ETL JS file and set sail:
+
 ```js
+const ETL = require("./etl/etl-ingest.js").QueryUnit;
+const NHLPublicAPI = require("./apidefs.js").NHLPublicAPI
+
 // A test ETL query that fetches the name of the first player on the roster,
 // the name of the team, and the team ID, if you need that information for
 // some strange reason!
@@ -98,7 +103,22 @@ var TestQuery = {
             "value": "firstPlayerName"
         }
     ]
-};```
+};
+
+var GetFirstPlayerAndTeamName = ETL.Build(TestQuery);
+
+// To run the query:
+let result = GetFirstPlayerAndTeamName.runQuery({"id": 1});
+console.log(result);
+
+// Output:
+{
+    "id": 1,
+    "teamName": "New Jersey Devils",
+    "firstPlayerName": "Nathan Bastian"
+}
+
+```
 
 ### Generalized endpoint handling
 Within `api/outbound.js` is a generalized handler for any REST API. It defines endpoints, parameterized inputs, and modifier inputs that can be passed as part of a URI (in a GET request).\*

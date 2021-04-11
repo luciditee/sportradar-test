@@ -7,6 +7,21 @@ For this challenge, I chose to write in JavaScript (ES6+), striving to not rely 
 
 Nevertheless, this was written in a week, and I'm happy with how far it's come. Prior to this, it was nice to get my feet wet with JS again after a hiatus.
 
+   * [SportRadar API Challenge Solution](#sportradar-api-challenge-solution)
+      * [Requirements](#requirements)
+      * [How to use](#how-to-use)
+      * [In-Depth Look](#in-depth-look)
+         * [Generalized ETL handling](#generalized-etl-handling)
+            * [Extract](#extract)
+            * [Transform](#transform)
+            * [Load](#load)
+            * [Caching](#caching)
+            * [What does an ETL unit (query unit) look like?](#what-does-an-etl-unit-query-unit-look-like)
+         * [Generalized endpoint handling](#generalized-endpoint-handling)
+         * [Response caching](#response-caching)
+         * [Unit testing](#unit-testing)
+
+
 ## Requirements
 These are the JS-relevant tools used in my WSL 18.04 environment. Any other versions may cause undefined behavior, so use something >= these versions:
 
@@ -27,29 +42,38 @@ The ETL (**E**xtract, **T**ransform, **L**oad) system built into this solution i
 The system is tightly coupled with the endpoint handling, [discussed below.](#generalized-endpoint-handling), but also allows you to sample from *multiple different APIs* if required. This would be useful in contexts outside of closed systems, such as if you were to combine weather data with traffic report data.
 
 #### Extract
-The data is extracted from the API by way of *work units.* Work units represent individual API calls, which are paired to specific endpoints. In the overwhelming majority of cases, accessing certain data to complete an ETL cycle requires you to run certain API calls first. Adopting a convention from SQL, these are referred to in the code as "primary keys."
+The data is extracted from the API by way of *work units.* Work units represent individual API calls, which are paired to specific endpoints. In the overwhelming majority of cases, accessing certain data to complete an ETL cycle requires you to run certain API calls first. For this reason, a `priority` is defined for each WorkUnit, where lower priority numbers will run first in the sequence.
 
-For example, if you need to look up a team, and then subsequently use that team ID to look up how well they did for a particular season, the *team ID* is said to be the *primary key.* What this amounts to is that work units marked as primary keys will run before any other data is run, such that the needed information from those requests is pre-cached ahead of time.
-
-If data in one work unit depends on a data in another work unit, you can take advantage of the fact that work units are parsed sequentially, with primary keys always promoted to first.
+For example, if you need to look up a team, and then subsequently use that team ID to look up how well they did for a particular season, running the operation that acquires that team ID must run first, so you assign it `'priority': 1`. Then, the work unit responsible for handling the team's stats can run and reference the `teamID` of the previous work unit.
 
 #### Transform
 Work units are encapsulated into *query units*, which handle the data ingest (transform) phase of the data returned by work units. This makes the query unit the basic, "big-picture" definition of any ETL pipeline you wish to create.
 
 When creating a query unit, [API definitions](#generalized-endpoint-handling), work unit definitions, and *output transformations* are passed in as one JSON object. At that point, all you have to do is `RunQuery()` on the query unit! You've essentially built a multi-API-call query out of nested JSON objects, with parameterization. Once you get the output from this query, you can do whatever you want with it, but while building the query units, you should set up your *output transformation* first.
 
-The aforementioned *output transformation* is a key/value pair system that simply looks for data matching `key` in a hashtable composed of all of the WorkUnit outputs that ever occurred, and then
-include it in the final output with `value` as its column name.
+The aforementioned *output transformation* is a value matching system. The data returned by each of the work units is stored in a hashtable, and this hashtable is searched for the values you want. So, for example, if you've extracted 
 
 You can use the following embedded JSON syntax to extract nested data if needed:
 
 ```js
-// Get the name of the first player from the roster query
-[ {"key": "roster[0][person][fullName]", "value":"firstPlayer"}]
+// The internal query hashtable contains the result of every prior
+// work unit that ran, so we can pass direct object property refs
+// in the "find" string and give it a better name in the "replace"
+// field. Ergo, whatever value was stored at the 'find' point will
+// take on the name stored in 'replace' when returning the result.
+"outputTransform" : [ 
+    {
+    // full name of the first person in the player roster
+    "find": "roster[0][person][fullName]", 
+    "replace":"firstPlayer"
+    }
+]
 ```
 
 #### Load
-The *load phase* is simple in that it returns JSON and can be thus converted easily into any format. For the purposes of this exercise, a CSV converter is supplied (see `etl-csv.js`).
+The *load phase* is simple in that it returns JSON and can be thus converted easily into any format. If you've configured endpoints to be cacheable, the result will also be temporarily saved for fast access later on.
+
+For the purposes of this exercise, a CSV converter is supplied (see `etl-csv.js`).
 
 #### Caching
 Outbound API requests are always cached, as long as the endpoint defs are configured to allow it (see [below](#response-caching) for details). The results of different `QueryUnit`s can also be cached based on the input parameters, so that repeat-instances of the same query will always return the same result without saturating the network.
@@ -75,32 +99,39 @@ var TestQuery = {
         {
             "apiSlug": "NHLPublicAPI",
             "endpointSlug": "TeamByID",
-            "remoteKey": "id",
-            "localKey": "teamNumericID",
-            "isPrimary": true,
-            "depParams": ["id"]
+            "rename": [ 
+                {
+                    "find" : "id",
+                    "replace" : "teamId"
+                } 
+            ],
+            "priority": 1,
         },
         {
             "apiSlug": "NHLPublicAPI",
             "endpointSlug": "TeamRoster",
-            "remoteKey": "roster",
-            "localKey": "roster",
-            "isPrimary": false,
-            "depParams": ["id"]
+            "priority": 10,
+            "depParams": [
+                {
+                    "key": "id",      // we're expecting to pass a team id, so
+                    "value": "teamId" // we use the previously acquired
+                                      // & renamed 'teamId' property
+                }
+            ]
         }
     ],
     "outputTransform": [
         { 
-            "key": "id",
-            "value": "teamId"
+            "find": "teamId",
+            "replace": "TeamID"
         },
         {
-            "key": "name",
-            "value": "teamName"
+            "find": "name",
+            "replace": "TeamName"
         },
         {
-            "key": "key[0][person][name]",
-            "value": "firstPlayerName"
+            "find": "roster[0][person][name]",
+            "replace": "NameOfFirstPlayer"
         }
     ]
 };
@@ -113,9 +144,9 @@ console.log(result);
 
 // Output:
 {
-    "id": 1,
-    "teamName": "New Jersey Devils",
-    "firstPlayerName": "Nathan Bastian"
+    "TeamID": 1,
+    "TeamName": "New Jersey Devils",
+    "NameOfFirstPlayer": "Nathan Bastian"
 }
 
 ```

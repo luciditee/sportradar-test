@@ -12,34 +12,41 @@ var TestQuery = {
         {
             "apiSlug": "NHLPublicAPI",
             "endpointSlug": "TeamByID",
-            "remoteKey": "id",
-            "localKey": "teamNumericID",
-            "isPrimary": true,
-            "depParams": ["id"]
+            "rename": [ 
+                {
+                    "find" : "id",
+                    "replace" : "teamId"
+                } 
+            ],
+            "priority": 1,
         },
         {
             "apiSlug": "NHLPublicAPI",
             "endpointSlug": "TeamRoster",
-            "remoteKey": "roster",
-            "localKey": "roster",
-            "isPrimary": false,
-            "depParams": ["id"]
+            "priority": 10,
+            "depParams": [
+                {
+                    "key": "id",      // we're expecting to pass a team id, so
+                    "value": "teamId" // we use the previously acquired
+                                      // & renamed 'teamId' property
+                }
+            ]
         }
     ],
     "outputTransform": [
         { 
-            "key": "id",
-            "value": "teamId"
+            "find": "teamId",
+            "replace": "TeamID"
         },
         {
-            "key": "name",
-            "value": "teamName"
+            "find": "name",
+            "replace": "TeamName"
         },
         {
-            "key": "key[0][person][name]",
-            "value": "firstPlayerName"
+            "find": "roster[0][person][name]",
+            "replace": "NameOfFirstPlayer"
         }
     ]
 };
 
-var testCase = ETL.Build(TestQuery);
+//var testCase = ETL.Build(TestQuery);

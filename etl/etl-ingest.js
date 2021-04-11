@@ -62,55 +62,61 @@ Object.byString = function(o, s) {
     return o;
 }
 
-// Helper function for translating k/v pairs stored as objects into a singular,
-// flat JSON object.
-var TranslateHashtable = function(data) {
-    let hashtable = {};
-    for (k in data) {
-        if (data[k]["key"] === undefined || data[k]["value"] === undefined)
-            continue; // skip wholly invalid entries
-        if (typeof data[k]["key"] === 'string' || data[k]["key"] instanceof String)
-            continue; // key is expected to be a string, skip invalid keys
-                      // might be worth putting an error/warning here to aid debugging?
-        hashtable[data[k].key] = data[k].value;
+// Function that runs a boolean intersection between two hashtables.
+var intersectHashtables = function(a,b) {
+    let first = Object.getOwnPropertyNames(a);
+    let second = Object.getOwnPropertyNames(b);
+    let output = {};
+
+    for (let i in first) {
+        for (let j in second) {
+            if (first[i] === second[j]) {
+                output[first[i]] = b[second[j]];
+                break;
+            }
+        }
     }
-    return hashtable;
+
+    return output;
 }
 
 class ETLWorkUnit {
-    constructor(apiSlug, endpointSlug, remoteKey, localKey, isPrimary=false, depParams=[], depMods=[]) {
-        this.apiSlug = apiSlug;             // slug name for the API being used in this unit
-        this.endpointSlug = endpointSlug;   // slug name for the endpoint within that API
-        this.remoteKey = remoteKey;         // what remote member key to look out for
-        this.localKey = localKey;           // what the local object key name should be.
-        this.isPrimary = isPrimary;         // is this considered a "primary key"
-        this.depParams = depParams;         // parameters derived from the output of another unit
-        this.depMods = depMods;             // ditto, but modifiers
+    constructor(apiSlug, endpointSlug, rename, priority, depParams, depMods) {
+        this.depParams = depParams === undefined ? [] : depParams;
+        this.depMods = depMods === undefined ? [] : depMods;
+        this.rename = rename === undefined ? [] : rename;
+        this.priority = priority === undefined ? 0 : priority;
+
+        if (apiSlug === undefined)
+            throw "API slug must be provided in order for work unit to function";
+
+        if (endpointSlug === undefined)
+            throw "Endpoint handle must be provided in order for work unit to function";
+        
+        if (!Array.isArray(rename)) 
+            throw "'rename' must be passed as array of objects containing properties "
+                + "'find' and 'replace'";
+        
+        if (typeof priority === 'number')
+            throw 'priority must be passed as a number'
+        
+        if (!Array.isArray(depParams))
+            throw "depParams must be passed as array of string parameters to pass to the endpoint";
+        
+        if (!Array.isArray(depMods))
+            throw "depMods must be passed as array of string modifiers to pass to the endpoint";
+
+        this.apiSlug = apiSlug;
+        this.endpointSlug = endpointSlug;
+        this.rename = rename;
     }
 
     // for passing basic JSON objects, it's a good idea to make sure they share a prototype
     // with this class, so this function validates such a json object would contain all the
     // necessary values ahead-of-time
     Build(primitive) {
-        if (primitive["apiSlug"] === undefined)
-            throw "A valid API slug is required to generate a work unit";
-
-        if (primitive["endpointSlug"] === undefined)
-            throw "A slug to refer to an endpoint is required to generate a work unit";
-
-        if (primitive["remoteKey"] === undefined)
-            throw "A remote object key name must be passed as a string to generate a work unit";
-
-        if (primitive["localKey"] === undefined) 
-            throw "A local object key name must be passed as a string to generate a work unit";
-        
-        if (primitive["isPrimary"] === undefined) primitive["isPrimary"] = false;
-        if (primitive["depParams"] === undefined) primitive["depParams"] = [];
-        if (primitive["depMods"] === undefined) primitive["depMods"] = [];
-
-        return new this(primitive["apiDef"], primitive["endpointSlug"], primitive["remoteKey"],
-            primitive["localKey"], primitive["isPrimary"], primitive["depParams"],
-            primitive["depMods"]);
+        return (primitive['apiSlug'], primitive['endpointSlug'], primitive['priority'],
+            primitive['depParams'], primitive['depMods']);
     }
 
 
@@ -133,67 +139,99 @@ class QueryUnit {
         if (outputTransform === undefined || !Array.isArray(outputTransform))
             throw "outputTransform must be passed as an array of objects";
         
-        // "$" = once again, taking advantage of hashtables, to avoid JS assuming
-        // that I want to create an array rather than an object
-        // $ is considered a valid variable character, so we can use it as a prefix
-        // and it'd probably be good to define this as a const somewhere
-        this.workUnits = {};
-        this.primaryKeys = [];
-        this.nonPrimaryKeys = [];
-        for (let i in workUnits) {
-            let u = ETLWorkUnit.BuildWorkUnit(workUnits[i])
-            this.workUnits["$"+u.localKey] = u;
-            if (u.isPrimary)
-                this.primaryKeys.push(u.localKey);
-            else
-                this.nonPrimaryKeys.push(u.localKey);
-        }
-
-        if (this.primaryKeys.length == 0)
-            throw "0 primary keys found on query unit `" + this.primaryKey + "', "
-                + "at least one must be marked as a primary (required) key";
-
+        this.workUnits = workUnits.sort((a, b) => (a.priority > b.priority) ? 1 : -1);
+        this.outputTransform = outputTransform;
         this.outboundHandlers = {};
-        for (let i in apiDefs) {
-            let o = Outbound.CreateHandler(apiDefs[i])
-            this.outboundHandlers["$"+o.slug] = o;
-        }
+        
+        for (let i in apiDefs) 
+            this.outboundHandlers["$"+apiDefs[i]] = Outbound.Build(apiDefs[i]);
     }
 
-    // This is really the core of the program right here: given a series of inputs,
-    // prioritize which queries to run first given a specific set of primary keys
-    // "data" is an array of objects in the following format:
-    // {"key":workUnitLocalKeyHere, "value":valueBeingPassedHere}
+    // The primary linchpin of the ETL system!
     RunQuery(data) {
-        let ret = {};
+        let outputMap = {};
+        outputMap = Object.assign(outputMap, data);
 
-        // step 1: translate input array into an anonymous container object
-        let hashtable = TranslateHashtable(data);
+        // Run each endpoint request, mapping parameters
+        // and modifiers as required.
+        for (let i in this.workUnits) {
+            let unit = this.workUnits[i];
+            let completed = false;
+            let outbound = this.GetOutboundHandlerBySlug(unit['apiSlug']);
 
-        // step 2: get primary keys, find them in the hashtable, if they don't
-        // exist then error out because that means we didn't pass the right number
-        // of primary keys
-        for (let p in this.primaryKeys) {
-            // find it in the hashtable
-            let workUnit = this.GetWorkUnitByLocalKey(this.primaryKeys[p]);
-            console.assert(workUnit !== undefined);
-            ret[workUnit.localKey] = this.ProcessWorkUnit(workUnit, hashtable);
-            hashtable[workUnit.localKey] = ret[workUnit.localKey];
+            outbound.sendRequest(
+                unit.endpointSlug, 
+                MapParams(unit.depParams),
+                MapParams(unit.depMods),
+                (data, statusCode) => {
+                    // data starts as string and must be parsed
+                    // then it can have its find/replace operation
+                    // done on it 
+                    let parsed = JSON.parse(data);
+                    for (let j in unit['rename']) {
+                        parsed = FindReplaceKeys(
+                            parsed,
+                            unit['rename'][j]['find'],
+                            unit['rename'][j]['replace']
+                        );
+                    }
+                    
+                    outputMap = Object.assign(outputMap, parsed);
+                    completed = true; // allow passage to the next one
+                } 
+
+                // TODO: error callback handling
+            );
+            
+            // block progression until last request finishes
+            // this is one extremely crucial reason I included a cache
+            // and an unavoidable drawback of ETL--if there are data
+            // dependencies, you *must* handle the dependencies first.
+            while(!completed) {};
         }
 
-        // step 3: the previous step made primary key data accessible to us
-        // in the hashtable, so we just do it again for non-primary keys
-        for (let n in this.nonPrimaryKeys) {
-            let workUnit = this.GetWorkUnitByLocalKey(this.nonPrimaryKeys[n]);
-            console.assert(workUnit !== undefined);
-            ret[workUnit.localKey] = this.ProcessWorkUnit(workUnit, hashtable);
-            hashtable[workUnit.localKey] = ret[workUnit.localKey];
+        // With that, we've built an enormous hashtable
+        // composed mostly of data we don't need, so we
+        // pare it down using the find/replace entries
+        // specified in the outputTransform array
+        for (let i in this.outputTransform) {
+            let transform = this.outputTransform[i];
+            if (transform['find'] !== undefined && transform['replace'] !== undefined) {
+                outputMap = this.FindReplaceKeys(currentOutput, tin)
+            }
         }
 
-        // at this stage the returned object should have all of the data handled by
-        // each work unit flattened out into one.
+        return outputMap;
+    }
 
-        return ret;
+    FindReplaceKeys(currentOutput, toFind, toReplaceWith) {
+        let output = currentOutput;
+        let keys = Object.getOwnPropertyNames(currentOutput);
+        if (keys.includes(toFind)) {
+            let v = output[toFind];
+            delete output[toFind];
+            output[toReplaceWith] = v;
+        }
+        return output;
+    }
+
+    // Looks at our current hashtable of returned data
+    MapParams(paramArray, currentHashtable) {
+        let output = [];
+        for (let i in paramArray) {
+            let entry = {};
+            entry["key"] = paramArray[i]["key"];
+            entry["value"] = Object.byString(currentHashtable, paramArray[i]["value"]);
+
+            if (entry["value"] === undefined)
+                throw "(possible priority misconfiguration) "
+                    + "invalid parameter while building param/modifier hashtable: "
+                    + " key `" + entry["key"] + "' is undefined.";
+
+            output.push(entry);
+        }
+
+        return output;
     }
 
     ProcessWorkUnit(workUnit, hashtable) {
@@ -224,38 +262,8 @@ class QueryUnit {
         return ret;
     }
 
-    ExtractParams(workUnit, hashtable, target) {
-        let output = {};
-        let workGroup = null;
-
-        // Could have just done workUnit[target] but I wanted to whitelist values
-        switch (target) {
-            case "depMods":
-                workGroup = workUnit.depMods;
-                break;
-            case "depParams": // Maybe move default up a line and put
-            default:          // a warning about an invalid string?
-                workGroup = workUnit.depParams;
-                break;
-        }
-
-        for (let i in workGroup) {
-            if (workGroup[i]["key"] === undefined || workGroup[i]["value"] === undefined)
-                continue; // skip invalid entries
-            
-            if (hashtable[workGroup[i]["key"]] !== undefined)
-                output[workGroup[i]["key"]] = workGroup[i]["value"];
-        }
-
-        return output;
-    }
-
     GetOutboundHandlerBySlug(slug) {
         return this.outboundHandlers["$"+slug]; 
-    }
-
-    GetWorkUnitByLocalKey(key) {
-        return this.workUnits["$"+key]; 
     }
 
     Build(primitive) {
@@ -264,8 +272,14 @@ class QueryUnit {
         if (primitive["apiDefs"] === undefined) primitive["apiDefs"] = [];
         if (primitive["workUnits"] === undefined) primitive["workUnits"] = [];
         if (primitive["outputTransform"] === undefined) primitive["outputTransform"] = [];
+
+        let units = [];
+        for (let i in primitive["workUnits"]) {
+            units.push(ETLWorkUnit.Build(primitive["workUnits"][i]))
+        }
+
         return new this(primitive["handle"], primitive["apiDefs"],
-            primitive["workUnits"], primitive["outputTransform"]);
+            units, primitive["outputTransform"]);
     }
 }
 

@@ -2,7 +2,7 @@ const Outbound = require('../api/outbound.js').OutboundHandler;
 const APIs = require('../apidefs.js');
 
 const CallbackUnitTester = require('./unit-test-generic.js').CallbackUnitTester;
-const Primitives = require('./outbound-test-inputs.js').OutboundTestPrimitives;
+const Primitives = require('./outbound-test-inputs.js');
 
 // outbound-test.js --  Unit tests for outbound.js
 //

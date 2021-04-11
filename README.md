@@ -87,7 +87,8 @@ This is the primary way of handling data throughout this solution. All you need 
 
 ```js
 const ETL = require("./etl/etl-ingest.js").QueryUnit;
-const NHLPublicAPI = require("./apidefs.js").NHLPublicAPI
+const obj2csv = require("./etl/etl-csv.js").obj2csv;
+const NHLPublicAPI = require("./apidefs.js").NHLPublicAPI;
 
 // A test ETL query that fetches the name of the first player on the roster,
 // the name of the team, and the team ID, if you need that information for
@@ -101,11 +102,16 @@ var TestQuery = {
             "endpointSlug": "TeamByID",
             "rename": [ 
                 {
-                    "find" : "id",
+                    "find" : "teams[0][id]",
                     "replace" : "teamId"
-                } 
+                },
+                {
+                    "find": "teams[0][name]",
+                    "replace": "teamName"
+                }
             ],
             "priority": 1,
+            
         },
         {
             "apiSlug": "NHLPublicAPI",
@@ -126,21 +132,21 @@ var TestQuery = {
             "replace": "TeamID"
         },
         {
-            "find": "name",
+            "find": "teamName",
             "replace": "TeamName"
         },
         {
-            "find": "roster[0][person][name]",
+            "find": "roster[0][person][fullName]",
             "replace": "NameOfFirstPlayer"
         }
     ]
 };
 
-var GetFirstPlayerAndTeamName = ETL.Build(TestQuery);
-
-// To run the query:
-let result = GetFirstPlayerAndTeamName.runQuery({"id": 1});
-console.log(result);
+var testCase = ETL.Build(TestQuery);
+var result = testCase.RunQuery({"id" : 1});
+result.then((output) => {
+    console.log(output);
+});
 
 // Output:
 {

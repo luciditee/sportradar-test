@@ -14,11 +14,16 @@ var TestQuery = {
             "endpointSlug": "TeamByID",
             "rename": [ 
                 {
-                    "find" : "id",
+                    "find" : "teams[0][id]",
                     "replace" : "teamId"
-                } 
+                },
+                {
+                    "find": "teams[0][name]",
+                    "replace": "teamName"
+                }
             ],
             "priority": 1,
+            
         },
         {
             "apiSlug": "NHLPublicAPI",
@@ -39,14 +44,18 @@ var TestQuery = {
             "replace": "TeamID"
         },
         {
-            "find": "name",
+            "find": "teamName",
             "replace": "TeamName"
         },
         {
-            "find": "roster[0][person][name]",
+            "find": "roster[0][person][fullName]",
             "replace": "NameOfFirstPlayer"
         }
     ]
 };
 
-//var testCase = ETL.Build(TestQuery);
+var testCase = ETL.Build(TestQuery);
+var result = testCase.RunQuery({"id" : 1});
+result.then((output) => {
+    console.log(obj2csv(output));
+});

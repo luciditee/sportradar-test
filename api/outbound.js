@@ -134,7 +134,7 @@ class OutboundHandler {
     // A nice convenient way to add outbound handlers for endpoints using a JSON object.
     // In theory, we could pass files full of these things which would make redefining endpoints a lot easier
     // and would allow live changes to the endpoint config with only one file.
-    static CreateHandler(primitive={}) {
+    static Build(primitive={}) {
         // validation--really just making sure things that should be present are present
         if (primitive["slug"] === undefined) primitive["slug"] = "default-outbound-handler";
         if (primitive["parentURI"] === undefined) primitive["parentURI"] = "http://localhost/api";
@@ -294,7 +294,7 @@ class OutboundHandler {
         let requestStr = this.generateRequestURI(endpoint, 
             parameters == null ? {} : parameters, 
             modifiers == null ? {} : modifiers); 
-        //console.log("Requesting the following: `" + requestStr + "'");
+        //console.log("Requesting the following: " + requestStr);
         
         let url = new URL(requestStr);
         this.StageRequest(url);

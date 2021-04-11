@@ -22,8 +22,11 @@ var obj2csv = (obj) => {
     // in the above code, otherwise we might have a player who is
     // named NaN playing for the Leafs and that's no good
     let arr = [];
-    for (let i = 0; i < keys.length; i++)
-        output += (obj[keys[i]]) + (i != keys.length-1) ? "," : "";
+    for (let i = 0; i < keys.length; i++) {
+        output += (obj[keys[i]]);
+        output += (i != keys.length-1) ? "," : "";
+    }
+        
 
     // ways to improve this code:
     

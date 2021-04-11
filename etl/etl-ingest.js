@@ -1,6 +1,6 @@
 
 const Outbound = require('../api/outbound.js').OutboundHandler;
-const Endpoint = require('./api/outbound.js').Endpoint;
+const Endpoint = require('../api/outbound.js').Endpoint;
 
 // etl-ingest.js -- The heart of the system, responsible for pulling in frequently
 //                  accessed data and making meaningful use of it. Takes heavy
@@ -53,7 +53,7 @@ Object.byString = function(o, s) {
     var a = s.split('.');
     for (var i = 0, n = a.length; i < n; ++i) {
         var k = a[i];
-        if (isObject(o) && k in o) {
+        if (typeof o === 'object' && k in o) {
             o = o[k];
         } else {
             return;
@@ -93,18 +93,20 @@ class ETLWorkUnit {
         if (endpointSlug === undefined)
             throw "Endpoint handle must be provided in order for work unit to function";
         
-        if (!Array.isArray(rename)) 
+        if (!Array.isArray(this.rename)) 
             throw "'rename' must be passed as array of objects containing properties "
-                + "'find' and 'replace'";
+                + "'find' and 'replace': " + rename;
         
-        if (typeof priority === 'number')
+        if (!(typeof priority === 'number'))
             throw 'priority must be passed as a number'
         
-        if (!Array.isArray(depParams))
-            throw "depParams must be passed as array of string parameters to pass to the endpoint";
+        if (!Array.isArray(this.depParams))
+            throw "depParams must be passed as array of string parameters to pass to the endpoint: "
+                + depParams;
         
-        if (!Array.isArray(depMods))
-            throw "depMods must be passed as array of string modifiers to pass to the endpoint";
+        if (!Array.isArray(this.depMods))
+            throw "depMods must be passed as array of string modifiers to pass to the endpoint: "
+                + depMods;
 
         this.apiSlug = apiSlug;
         this.endpointSlug = endpointSlug;
@@ -114,9 +116,9 @@ class ETLWorkUnit {
     // for passing basic JSON objects, it's a good idea to make sure they share a prototype
     // with this class, so this function validates such a json object would contain all the
     // necessary values ahead-of-time
-    Build(primitive) {
-        return (primitive['apiSlug'], primitive['endpointSlug'], primitive['priority'],
-            primitive['depParams'], primitive['depMods']);
+    static Build(primitive) {
+        return new this(primitive['apiSlug'], primitive['endpointSlug'], primitive['rename'],
+             primitive['priority'], primitive['depParams'], primitive['depMods']);
     }
 
 
@@ -143,82 +145,101 @@ class QueryUnit {
         this.outputTransform = outputTransform;
         this.outboundHandlers = {};
         
-        for (let i in apiDefs) 
-            this.outboundHandlers["$"+apiDefs[i]] = Outbound.Build(apiDefs[i]);
+        for (let i in apiDefs) {
+            this.outboundHandlers["$"+apiDefs[i].slug] = Outbound.Build(apiDefs[i]);
+        }
+            
     }
 
     // The primary linchpin of the ETL system!
-    RunQuery(data) {
+    async RunQuery(data) {
         let outputMap = {};
         outputMap = Object.assign(outputMap, data);
-
+        
         // Run each endpoint request, mapping parameters
         // and modifiers as required.
         for (let i in this.workUnits) {
             let unit = this.workUnits[i];
-            let completed = false;
+            //let completed = false; // see comment at bottom of for loop
             let outbound = this.GetOutboundHandlerBySlug(unit['apiSlug']);
+            let queryUnit = this;
 
-            outbound.sendRequest(
-                unit.endpointSlug, 
-                MapParams(unit.depParams),
-                MapParams(unit.depMods),
-                (data, statusCode) => {
-                    // data starts as string and must be parsed
-                    // then it can have its find/replace operation
-                    // done on it 
-                    let parsed = JSON.parse(data);
-                    for (let j in unit['rename']) {
-                        parsed = FindReplaceKeys(
-                            parsed,
-                            unit['rename'][j]['find'],
-                            unit['rename'][j]['replace']
-                        );
-                    }
-                    
-                    outputMap = Object.assign(outputMap, parsed);
-                    completed = true; // allow passage to the next one
-                } 
+            //console.log(unit.endpointSlug);
+            await this.PromiseWrapper(unit, queryUnit, outputMap, outbound);
 
-                // TODO: error callback handling
-            );
-            
-            // block progression until last request finishes
-            // this is one extremely crucial reason I included a cache
-            // and an unavoidable drawback of ETL--if there are data
-            // dependencies, you *must* handle the dependencies first.
-            while(!completed) {};
+            // previously used a spinlock to lock the loop, this introduced
+            // race conditions if the request was not previously cached, causing
+            // the program to lock up! Thus: removed while (!completed) loop.
         }
 
-        // With that, we've built an enormous hashtable
-        // composed mostly of data we don't need, so we
-        // pare it down using the find/replace entries
-        // specified in the outputTransform array
+        // Find and replace the final output transform values
+        let final = {};
         for (let i in this.outputTransform) {
             let transform = this.outputTransform[i];
             if (transform['find'] !== undefined && transform['replace'] !== undefined) {
-                outputMap = this.FindReplaceKeys(currentOutput, tin)
+                //console.log("finding and replacing " + transform['find'] + " with " + transform['replace']);
+                outputMap = this.FindReplaceKey(outputMap, transform['find'], transform['replace']);
+                if (outputMap[transform['replace']] !== undefined)
+                    final[transform['replace']] = outputMap[transform['replace']];
             }
         }
 
-        return outputMap;
+        return final;
     }
 
-    FindReplaceKeys(currentOutput, toFind, toReplaceWith) {
+    PromiseWrapper(unit, queryUnit, outputMap, outbound) {
+        return new Promise(
+            (resolve, reject) => {
+                outbound.sendRequest(
+                    unit.endpointSlug, 
+                    outputMap,
+                    outputMap,
+                    (data) => {
+                        //console.log("received data")
+                        // data starts as string and must be parsed
+                        // then it can have its find/replace operation
+                        // done on it 
+                        let parsed = JSON.parse(data);
+                        for (let j in unit['rename']) {
+                            parsed = queryUnit.FindReplaceKey(
+                                parsed,
+                                unit['rename'][j]['find'],
+                                unit['rename'][j]['replace']
+                            );
+                        }
+                        
+                        outputMap = Object.assign(outputMap, parsed);
+                        resolve();
+                    },
+                    null,
+                    (data) =>  {
+                        console.error("Failure on request " + unit.endpointSlug);
+                        reject();
+                    }
+                );
+            }
+        );
+    }
+
+    FindReplaceKey(currentOutput, toFind, toReplaceWith) {
         let output = currentOutput;
-        let keys = Object.getOwnPropertyNames(currentOutput);
-        if (keys.includes(toFind)) {
-            let v = output[toFind];
-            delete output[toFind];
+        let v = Object.byString(output, toFind);
+        if (v !== undefined)
             output[toReplaceWith] = v;
+        else {
+            //console.log("couldn't find key: " + toFind);
+            //console.log(currentOutput);
         }
+            
+
         return output;
     }
 
-    // Looks at our current hashtable of returned data
-    MapParams(paramArray, currentHashtable) {
+    // Ended up not needing this.
+    /*MapParams(paramArray, currentHashtable) {
         let output = [];
         for (let i in paramArray) {
+            let keys = Object.getOwnPropertyNames(paramArray)
             let entry = {};
             entry["key"] = paramArray[i]["key"];
             entry["value"] = Object.byString(currentHashtable, paramArray[i]["value"]);
@@ -232,7 +253,7 @@ class QueryUnit {
         }
 
         return output;
-    }
+    }*/
 
     ProcessWorkUnit(workUnit, hashtable) {
         if (!(workUnit instanceof ETLWorkUnit))
@@ -266,7 +287,7 @@ class QueryUnit {
         return this.outboundHandlers["$"+slug]; 
     }
 
-    Build(primitive) {
+    static Build(primitive) {
         if (primitive["handle"] === undefined) 
             primitive["handle"] = "default-query-unit";
         if (primitive["apiDefs"] === undefined) primitive["apiDefs"] = [];

@@ -91,7 +91,7 @@ class CacheContainer {
         let cacheEntriesTemp = {};
         cacheEntriesTemp["cacheName"] = this.name;
         if (fs.existsSync(this.fileName)) {
-            console.log("Found existing cache @ " + this.fileName + ", using it");
+            //console.log("Found existing cache @ " + this.fileName + ", using it");
             // cache already existed, attempt to parse it
             // Format sanity checking would be good to do here, but
             // since I only expect to read/write from this class, I'll

@@ -1,5 +1,5 @@
 # SportRadar API Challenge Solution
-This is a solution for the [SportRadar API Challenge](https://github.com/sportradarus/sportradar-api-challenge). **It is currently a work-in-progress** and should be "done" enough to fulfill the requirements of the challenge by EOD Friday. Most work was done at night after completing any IRL-responsibilities and obviously so as to not conflict with my current work hours.
+This is a solution for the [SportRadar API Challenge](https://github.com/sportradarus/sportradar-api-challenge). Most work was done at night after completing any IRL-responsibilities and obviously so as to not conflict with my current work hours.
 
 For this challenge, I chose to write in JavaScript (ES6+), striving to not rely so much on external dependencies of any kind. I dislike forcing people to have a ton of dependencies installed and taking up disk space, especially if it's just for 1-2 features in a given library. However, I do recognize that for each of the sub-problem solutions implemented here, like REST integration and caching, there are likely other more mature solutions.
 

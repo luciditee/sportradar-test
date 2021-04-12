@@ -47,6 +47,51 @@ var NHLPublicAPI = {
             "parameters": ["id"],
             "modifiers": []
         },
+        {
+            "slug": "TeamStats",
+            "request": "teams/{id}/stats",
+            "useCache": true,
+            "parameters": ["id"],
+            "modifiers": []
+        },
+        {
+            "slug": "TeamSchedule",
+            "request": "schedule",
+            "useCache": true,
+            "parameters": [],
+            "modifiers": [
+                {
+                    "handle": "teamId",
+                },
+                {
+                    "handle" : "startDate",
+                },
+                {
+                    "handle" : "endDate",
+                },
+            ]
+        },
+        {
+            "slug": "PlayerInfo",
+            "request": "people/{id}",
+            "useCache": true,
+            "parameters": ["id"],
+            "modifiers": []
+        },
+        {
+            "slug": "PlayerStatsBySeason",
+            "request": "people/{id}/stats",
+            "useCache": true,
+            "parameters": ["id"],
+            "modifiers": [
+                {
+                    "handle": "stats"
+                },
+                {
+                    "handle": "season"
+                },
+            ]
+        },
     ]
 };
 

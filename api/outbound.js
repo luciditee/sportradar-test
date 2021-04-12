@@ -2,6 +2,7 @@
 const https = require('https')
 const URL = require('url').URL;
 const Cache = require('./cache.js').Cache;
+const URLSearchParams = require('url').URLSearchParams;
 
 /*
  * outbound.js -- A simple functional wrapper for making outbound API requests.
@@ -162,16 +163,21 @@ class OutboundHandler {
         );
     }
 
-    StageRequest(url, port=443) {
+    StageRequest(url, mods=null, port=443) {
         if (!(url instanceof URL))
             throw "Passed URL object is not actually URL object: " + url.toString();
-
+        
         this.connectionOptions = {
             hostname: url.hostname,
             port: port, 
             path: url.pathname,
             method: 'GET' // TODO: For the moment, our outbound only supports GET
         };
+
+        if (mods !== null) {
+            this.connectionOptions.searchParams = mods;
+            this.connectionOptions.path += "?" + mods.toString();
+        }
     }
 
     // Getter that returns the base URI in the format
@@ -229,7 +235,7 @@ class OutboundHandler {
         return ep;
     }
 
-    generateRequestURI(endpoint, parameters={}, modifiers={}) {
+    generateRequestURI(endpoint, parameters={}) {
         //console.log(this);
         let ep = this.resolveEndpoint(endpoint);
 
@@ -261,19 +267,29 @@ class OutboundHandler {
         
         // TODO: Strip out any {UnusedValues}?
 
+        return this.RequestBaseURI + output;
+    }
+
+    generateQueryStringParams(endpoint, modifiers) {
+        let ep = this.resolveEndpoint(endpoint);
+        let output = "";
+
+        //process.exit(0);
         // parameters are accounted for, we can now worry about modifiers (if any)
         // NOTE: if we still sorted modifiers, which we don't anymore, this is where it would happen        
+        let mKeys = Object.getOwnPropertyNames(modifiers);
         let first = true;
-        for (let key in modifiers)
-            if (Object.prototype.hasOwnProperty.call(modifiers, key))
-                for (let validModifier in ep.modifiers)
-                    if (validModifier.handle !== undefined && validModifier.handle === key) {
-                        // we found a valid modifier, append it to the string with its value
-                        output += ((!first ? "&" : "?") + key + "=" + modifiers[key]);
-                        break;
-                    }
+        for (let i in mKeys) {
+            for (let j in ep.modifiers) {
+                if (mKeys[i] === ep.modifiers[j].handle) {
+                    output += ((!first ? "&" : "") + mKeys[i] + "=" + modifiers[mKeys[i]]);
+                    if (first)
+                        first = false; // changes query string ? to & for chained modifiers
+                }
+            }
+        }
 
-        return this.RequestBaseURI + output;
+        return new URLSearchParams(output);
     }
 
     // The main show: sending a request out based on predefined endpoints.
@@ -291,20 +307,24 @@ class OutboundHandler {
         // use arrow notation to do this as seen below. This isn't a dealbreaker, just wanted it
         // known that the irony isn't lost on me!
 
+        let queryStringMods = null;
+        if (modifiers !== null) {
+            queryStringMods = this.generateQueryStringParams(endpoint, modifiers);
+            //console.log(queryStringMods);
+        }
+
         let requestStr = this.generateRequestURI(endpoint, 
-            parameters == null ? {} : parameters, 
-            modifiers == null ? {} : modifiers); 
-        //console.log("Requesting the following: " + requestStr);
-        
-        let url = new URL(requestStr);
-        this.StageRequest(url);
-        
+            parameters == null ? {} : parameters);
+
+        this.StageRequest(new URL(requestStr), queryStringMods);
+        let cacheHandle = requestStr + "?" + queryStringMods.toString();
+
         // If we are allowed to use a cache, and the item has been cached recently,
         // we should grab it!
         let tCache = this.cache; // local copy to use in the anonymous functions below
         let epLocal = this.resolveEndpoint(endpoint); // ditto
         let canCache = epLocal.useCache; // ditto
-        let cachedResult = this.cache.findByKey(requestStr); // get cached result
+        let cachedResult = this.cache.findByKey(cacheHandle); // get cached result
         if (canCache && cachedResult !== undefined) { // cache result exists, use it
             //console.log("using cached response for " + requestStr);
             callbackDone(cachedResult, 200); // ensure we emulate HTTP 200 OK
@@ -335,8 +355,10 @@ class OutboundHandler {
                 // If we were allowed to cache, save this response.
                 if (canCache) {
                     // Use requestStr (the URI) as the key.
-                    tCache.addToCache(requestStr, responseBody, epLocal.cacheTTL);
+                    tCache.addToCache(cacheHandle, responseBody, epLocal.cacheTTL);
                 }
+
+                //console.log(responseBody);
 
                 if (callbackDone != null) 
                     callbackDone(responseBody, statusCode);

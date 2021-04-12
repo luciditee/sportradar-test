@@ -172,16 +172,32 @@ class QueryUnit {
             // the program to lock up! Thus: removed while (!completed) loop.
         }
 
-        // Find and replace the final output transform values
+        // Find and replace the final output transform values, and
+        // return the entire request as JSON (for debuggging) if no
+        // transform was specified.
+        if (this.outputTransform.length == 0)
+            return outputMap;
+        
         let final = {};
         for (let i in this.outputTransform) {
             let transform = this.outputTransform[i];
             if (transform['find'] !== undefined && transform['replace'] !== undefined) {
-                //console.log("finding and replacing " + transform['find'] + " with " + transform['replace']);
-                outputMap = this.FindReplaceKey(outputMap, transform['find'], transform['replace']);
-                if (outputMap[transform['replace']] !== undefined)
+                if (transform['parseCustom'] === undefined) {
+                    //console.log("finding and replacing " + transform['find'] + " with " + transform['replace']);
+                    outputMap = this.FindReplaceKey(outputMap, transform['find'], transform['replace']);
                     final[transform['replace']] = outputMap[transform['replace']];
+                } else {
+                    // if you pass a custom parser, the function will run and its
+                    // return value used for the output.
+                    let base = Object.byString(outputMap, transform['find']);
+                    if (base !== undefined)
+                        final[transform['replace']] = transform['parseCustom'](base, outputMap, final);
+                    else
+                        console.warn("warning: undefined return for transform base " + transform['find'])
+                }
             }
+
+            
         }
 
         return final;
@@ -233,54 +249,6 @@ class QueryUnit {
             
 
         return output;
-    }
-
-    // Ended up not needing this.
-    /*MapParams(paramArray, currentHashtable) {
-        let output = [];
-        for (let i in paramArray) {
-            let keys = Object.getOwnPropertyNames(paramArray)
-            let entry = {};
-            entry["key"] = paramArray[i]["key"];
-            entry["value"] = Object.byString(currentHashtable, paramArray[i]["value"]);
-
-            if (entry["value"] === undefined)
-                throw "(possible priority misconfiguration) "
-                    + "invalid parameter while building param/modifier hashtable: "
-                    + " key `" + entry["key"] + "' is undefined.";
-
-            output.push(entry);
-        }
-
-        return output;
-    }*/
-
-    ProcessWorkUnit(workUnit, hashtable) {
-        if (!(workUnit instanceof ETLWorkUnit))
-            throw "attempted to process work unit on an object that isn't a work unit: "
-                + workUnit;
-        
-        let outbound = this.GetOutboundHandlerBySlug(workUnit.apiSlug);
-        if (outbound === undefined)
-            throw "work unit attempted to reference outbound handler which is not defined "
-                + "for this query unit";
-        
-        let d = null;
-        outbound.sendRequest(workUnit.endpointSlug, 
-            ExtractParams(workUnit, hashtable, "depParams"),
-            ExtractParams(workUnit, hashtable, "depMods"),
-            (data, statusCode) => {
-                d = data;
-            } // TODO: error callback handling
-        );
-
-        let ret = null;
-        if (workUnit.isPrimary) {
-            ret = d[workUnit.remoteKey];
-        } else
-            ret = d;
-        
-        return ret;
     }
 
     GetOutboundHandlerBySlug(slug) {

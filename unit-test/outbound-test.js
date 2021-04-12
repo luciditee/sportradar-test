@@ -13,7 +13,7 @@ var RunUnitTests = function(specificTest=null) {
     console.log("Running unit tests for outbound.js: ");
 
     // Set up target for tests
-    let out = Outbound.CreateHandler(APIs.NHLPublicAPI);
+    let out = Outbound.Build(APIs.NHLPublicAPI);
 
     // Set up unit tests w/ expected outputs
     let testObjects = [

@@ -5,6 +5,7 @@
 # additions below this line before "Logs" are by me, for the
 # needs of this project specifically
 *.cache
+*.csv
 
 # Logs
 logs

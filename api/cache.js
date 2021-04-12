@@ -145,7 +145,7 @@ class CacheContainer {
             this.cacheEntries[keyHash] = list;
         }
 
-        console.log("adding " + key + " to cache");
+        //console.log("adding " + key + " to cache");
         
         // Since we know for a fact there's an array here, let's make
         // sure we didn't already store this.

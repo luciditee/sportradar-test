@@ -118,7 +118,7 @@ Work units are encapsulated into *query units*, which handle the data ingest (tr
 
 When creating a query unit, [API definitions](#generalized-endpoint-handling), work unit definitions, and *output transformations* are passed in as one JSON object. At that point, all you have to do is `RunQuery()` on the query unit! You've essentially built a multi-API-call query out of nested JSON objects, with parameterization. Once you get the output from this query, you can do whatever you want with it, but while building the query units, you should set up your *output transformation* first.
 
-The aforementioned *output transformation* is a value matching system. The data returned by each of the work units is stored in a hashtable, and this hashtable is searched for the values you want. So, for example, if you've extracted 
+The aforementioned *output transformation* is a value matching system. The data returned by each of the work units is stored in a hashtable, and this hashtable is searched for the values you want.
 
 You can use the following embedded JSON syntax to extract nested data if needed:
 
